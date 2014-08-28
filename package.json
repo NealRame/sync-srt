@@ -1,0 +1,19 @@
+{
+  "name": "srt-sync",
+  "bin": {
+    "srt-sync": "./srtsync.js"
+  },
+  "version": "0.0.1",
+  "description": "synchronise subtitle",
+  "main": "srtsync.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Neal.Rame.",
+  "license": "ISC",
+  "private": true,
+  "dependencies": {
+    "node-getopt": "^0.2.3",
+    "sprintf": "^0.1.4"
+  }
+}
