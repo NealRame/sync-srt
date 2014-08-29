@@ -101,109 +101,92 @@ var getopt = require('node-getopt').create([
 		[ 'v', 'version',         'Show version' ]
 	])
 	.setHelp(
-		'Usage: srt-sync [OPTIONS] PATH_TO_SUBTITLES_FILE [+|-]TIME_VALUE'
+		'Usage: srt-sync [OPTIONS] PATH_TO_SRT_FILE OFFSET|START'
 		+ '\n' + 'Options:'
 		+ '\n' + '[[OPTIONS]]'
 		+ '\n'
 		+ '\n' + 'Arguments:'
-		+ '\n' + '- PATH_TO_SUBTITLES_FILE is a path to an existing \'.srt\' file.'
-		+ '\n' + '- TIME_VALUE format:'
-		+ '\n' + '  * VALUE[s|ms], a number of seconds or milliseconds,'
-		+ '\n' + '  * [HH:][MM:]SS'
+		+ '\n' + '  - PATH_TO_SRT_FILE is a path to an existing \'.srt\' file.'
+		+ '\n' + '  - OFFSET: '
+		+ '\n' + '    Format ::= [+|-]VALUEs|ms'
+		+ '\n' + '    A relative number of seconds or milliseconds. Subtitles are shifted by'
+		+ '\n' + '    the given value.'
+		+ '\n' + '  - START:'
+		+ '\n' + '    Format ::= [+|-][HH:][MM:]SS'
+		+ '\n' + '    The time at which the subtitles should begin to appear. Subtitles are '
+		+ '\n' + '    synchronised to start at the given value.'
 		+ '\n'
-		+ '\n' + 'If TIME_VALUE starts with a \'+\', all bounds are increased by the given value.'
-		+ '\n' + 'If TIME_VALUE starts with a \'-\', all bounds are decreased by the given value.'
-		+ '\n' + 'Otherwise, subtitles are synchronised to start at the given value.'
-		+ '\n'
+		+ '\n' + 'In both case synchronised subtitles which should start before 00:00:00 are'
+		+ '\n' + 'omitted.'
 	)
 	.bindHelp()
 	.on('output', set_output)
 	.on('version', show_version)
 	.parseSystem();
 
-if (getopt.argv.length < 2) {
-	console.error(
-		'Argument(s) missing.'
-		+ '\n' + more_details);
-	process.exit(1);
-}
+try {
+	if (getopt.argv.length < 2) {
+		throw new Error(
+			'Argument(s) missing.'
+			+ '\n' + more_details
+		);
+	}
 
-var filepath = getopt.argv[0];
+	var filepath = getopt.argv[0];
+	var synchronise = (function(value) {
+		var m;
 
-var synchronise = (function(value) {
-	var to_ms = function(v) {
-		var match, ms;
-
-		if (match = (/^(?:(\d\d):)?(?:(\d\d):)?(\d\d)$/).exec(v)) {
-			ms =  Number(match[1] || 0)*3600000
-				+ Number(match[2] || 0)*60000
-				+ Number(match[3]     )*1000;
-		} else if (match = (/^(\d+)ms/)) {
-			ms =  Number(match[1]);
-		} else if (match = (/^(\d)s/)) {
-			ms =  Number(match[1])*1000;
-		} else {
-			throw new Error(
-				'Wrong value for `OFFSET` argument.'
-					+ '\n' + more_details
-			);
-		}
-
-		return ms;
-	};
-
-	try {
-		switch (value[0]) {
-		case '+':
-			return (function(value) {
-				var offset = to_ms(value);
-				return function(timevalue) {
-					return time_to_str(timevalue + offset);
-				};
-			})(value.substr(1));
-
-		case '-':
-			return (function(value) {
-				var offset = to_ms(value);
-				return function(timevalue) {
-					return time_to_str(timevalue - offset);
-				}
-			})(value.substr(1));
-
-		default:
-			return (function() {
-				var start = to_ms(value);
+		if (m = (/^(\+|-)?(?:(\d\d):)?(?:(\d\d):)?(\d\d)$/).exec(value)) {
+			return (function(start) {
 				var offset;
 				return function(timevalue) {
 					if (! offset) {
 						offset = start - timevalue;
 					}
-					return time_to_str(timevalue + offset);
+					return timevalue + offset;
 				};
-			})();
+			})((m[1] === '-' ? -1:1)*(Number(m[2]||0)*3600 + Number(m[3]||0)*60 + Number(m[4]))*1000);
 		}
-	} catch (err) {
-		console.error(err.messsage);
-		process.exit(1);
-	}
 
-})(getopt.argv[1]);
-
-(new SubtitleReader(filepath))
-	.on(
-		'subtitle',
-		function (subtitle) {
-			output.write(sprintf('%d\n', subtitle.seq));
-			output.write(
-				sprintf(
-					'%s --> %s\n',
-					synchronise(subtitle.bounds.start),
-					synchronise(subtitle.bounds.stop)
-				)
-			);
-			subtitle.text.forEach(function (text) {
-				output.write(sprintf('%s\n', text));
-			});
-			output.write('\n');
+		if (m = (/^(\+|-)?(\d+)(s|ms)$/).exec(value)) {
+			return (function (offset) {
+				return function (timevalue) {
+					return timevalue + offset;
+				}
+			})((m[1] === '-' ? -1:1)*Number(m[2])*(m[3] === 's' ? 1000:1));
 		}
-	);
+
+		throw new Error(
+			'Wrong value for `OFFSET or START` argument.'
+				+ '\n' + more_details
+		);
+	})(getopt.argv[1]);
+
+	(new SubtitleReader(filepath))
+		.on(
+			'subtitle',
+			function (subtitle) {
+				var start = synchronise(subtitle.bounds.start),
+					stop  = synchronise(subtitle.bounds.stop);
+
+				if (start >= 0) {
+					output.write(sprintf('%d\n', subtitle.seq));
+					output.write(
+						sprintf(
+							'%s --> %s\n',
+							time_to_str(start),
+							time_to_str(stop)
+						)
+					);
+					subtitle.text.forEach(function (text) {
+						output.write(sprintf('%s\n', text));
+					});
+					output.write('\n');
+				}
+			}
+		);
+
+} catch (err) {
+	console.error(err.message);
+	process.exit(1);
+}
